@@ -2,6 +2,7 @@ package com.nash.basicsocket;
 
 import android.content.Context;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -17,8 +18,11 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
+import java.net.SocketException;
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = "MainActivity";
 
     Button mBtnStart, mBtnConnect, mBtnCommand, mBtnClose;
     byte[] mBuffer = new byte[10];
@@ -38,30 +42,10 @@ public class MainActivity extends AppCompatActivity {
         mBtnCommand = findViewById(R.id.btn_command);
         mBtnClose = findViewById(R.id.btn_close);
 
-        //asyncRWThread = new AsyncRWThread(getApplicationContext());
-
-        for(int i = 0; i<10; i++){
-            mBuffer[i] = (byte) i;
-        }
-
         mBtnStart.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                //new SampleAsyntask().execute();
-
-                //RWAsynTask rwAsynTask = new RWAsynTask(getApplicationContext());
-                //rwAsynTask.execute(mBuffer);
-
-                //asyncRWThread.execute();
                 new createSocket().execute();
-
-            }
-        });
-
-        mBtnConnect.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                //connect();
             }
         });
 
@@ -80,93 +64,18 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void closeSocket() {
-        //TODO: Check if close lock is useful.
-        try {
-            if(mSocket.isConnected() && !mSocket.isClosed()) {
 
-                mSocket.close();
-                mSocketState = false;
-                invalidateOptionsMenu();
-                Toast.makeText(getApplicationContext(),
-                        "Socket Closed!",
-                        Toast.LENGTH_SHORT).show();
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-            Toast.makeText(getApplicationContext(),
-                    e.getMessage(),
-                    Toast.LENGTH_SHORT).show();
-        }
-    }
-
-
+    /**
+     * Send Data via Socket
+     */
     private void sendCommand() {
-        new sendCommandATask().execute(new byte[]{0x0a});
+        //new sendCommandATask().execute(new byte[]{0x0a});
+        new advancedSendCommandATask().execute(new byte[]{0x0a});
     }
 
-    private void connect() {
-
-        asyncRWThread = new AsyncRWThread(getApplicationContext());
-        mSocket = asyncRWThread.getSocket();
-        mBufferedInputStream = asyncRWThread.getInputStream();
-        mBufferedOutputStream = asyncRWThread.getOutputStream();
-
-        if(mSocket != null || mBufferedInputStream != null || mBufferedOutputStream != null){
-            Toast.makeText(getApplicationContext(),
-                    "Socket Connected!",
-                    Toast.LENGTH_SHORT).show();
-        }
-        else{
-            Toast.makeText(getApplicationContext(),
-                    "Socket Broken!",
-                    Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private class SampleAsyntask extends AsyncTask<Void,Integer,Void>{
-
-        @Override
-        protected void onPreExecute() {
-            super.onPreExecute();
-            Toast.makeText(getApplicationContext(),
-                    "onPreExecute() Called!",
-                    Toast.LENGTH_SHORT).show();
-        }
-
-        @Override
-        protected Void doInBackground(Void... voids) {
-
-            for(int i = 0; i<10 ; i++){
-                System.out.println(i);
-                publishProgress(i);
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-            return null;
-        }
-
-        @Override
-        protected void onProgressUpdate(Integer... values) {
-            if(!isCancelled()){
-                Toast.makeText(getApplicationContext(),
-                        "Value : " + values[0].toString(),
-                        Toast.LENGTH_SHORT).show();
-            }
-        }
-
-        @Override
-        protected void onPostExecute(Void aVoid) {
-            super.onPostExecute(aVoid);
-            Toast.makeText(getApplicationContext(),
-                    "Asyntask Completed!",
-                    Toast.LENGTH_SHORT).show();
-        }
-    }
-
+    /**
+     * Asynctask for running the Network related operations - Here, sendCommand to the Printer
+     */
     private class sendCommandATask extends AsyncTask<byte[], Boolean, String>{
 
         @Override
@@ -191,7 +100,149 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * Advanced Asynctask for running the Network related operations - Here, sendCommand to the Printer
+     */
+    private class advancedSendCommandATask extends AsyncTask<byte[], Boolean, String>{
+
+        @Override
+        protected String doInBackground(byte[]... bytes) {
+
+            try {
+                // Setting up Read timeout
+                mSocket.setSoTimeout(10);
+                sendata(bytes[0]);
+
+            } catch (IOException e) {
+                e.printStackTrace();
+                mSocketState = false;
+                invalidateOptionsMenu();
+                return e.getMessage();
+            }
+            return "Success!";
+        }
+
+        @Override
+        protected void onPostExecute(String s) {
+            if(!s.equals("Success!"))
+                Toast.makeText(getApplicationContext(), s, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     *  Read-Write Thread Class
+     */
+    public boolean sendata(byte[] bytes) {
+
+        boolean success = false;
+        String tmp = "";
+
+        // Write data to the Printer
+
+        if(mSocket.isConnected() && mBufferedOutputStream != null && mBufferedInputStream != null){
+
+            int totalLength = bytes.length;
+            // write data below 500 bytes
+            if (totalLength < 500) {
+                try {
+
+                    mBufferedOutputStream.write(bytes);
+                    mBufferedOutputStream.flush();
+                    Thread.sleep(100);
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    success = false;
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+
+                tmp = readDataFromBuffer();
+
+                if(tmp.contains("PRCDONE")) {
+                    return true;
+                }
+                else {
+                    return false;
+                }
+            }
+            // write data above 500 bytes
+            else {
+
+                int offset = 0;
+                int length = 500; //TODO: Check the wifi packet limit
+                int rem = totalLength;
+
+                do {
+                    try {
+
+                        mBufferedOutputStream.write(bytes, offset, length);
+                        mBufferedOutputStream.flush();
+
+                        tmp = readDataFromBuffer();
+
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        success = false;
+                    }
+
+                    offset += length;
+
+                    rem = rem - length;
+
+                    if (rem < length) {
+                        length = rem;
+                        rem = 0;
+                    }
+
+                } while (totalLength != offset && tmp.equals("PRCDONE"));
+                success = true;
+            }
+        }
+        return success;
+    }
+    // Read data sent by the Printer
+    private String readDataFromBuffer() {
+
+        String readBufferData = "";
+
+        int len = 0;
+
+        try {
+
+            byte[] prcdone = new byte[10];
+
+            len = mBufferedInputStream.available();
+
+            if(len != 0){
+
+                //mBufferedInputStream.mark(7);
+                mBufferedInputStream.read(prcdone, 0, len);
+
+                for(byte tmp : prcdone){
+                    readBufferData += (char)tmp;
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return readBufferData;
+    }
+
+    private class readerThread extends AsyncTask<Void, Void, Void>{
+
+        @Override
+        protected Void doInBackground(Void... voids) {
+
+            readDataFromBuffer();
+            return null;
+        }
+    }
+    /**
+     * Create a new socket
+     */
     private class createSocket extends AsyncTask<Void, Boolean, String>{
+
 
         @Override
         protected void onPreExecute() {
@@ -204,21 +255,25 @@ public class MainActivity extends AppCompatActivity {
         protected String doInBackground(Void... voids) {
 
             //Create a socket connection
-
-            mSocket = new Socket();
-            SocketAddress socketAddress = new InetSocketAddress("192.168.4.1", 23);
-
             try {
+                mSocket = new Socket();
+                mSocket.setReceiveBufferSize(10);
+                SocketAddress socketAddress = new InetSocketAddress("192.168.4.1", 23);
                 mSocket.connect(socketAddress, 2000);
 
                 if(mSocket.isConnected()){
                     mBufferedInputStream = new BufferedInputStream(mSocket.getInputStream());
                     mBufferedOutputStream = new BufferedOutputStream(mSocket.getOutputStream());
+
                     Log.d("Receive Buffer Size:" , String.valueOf(mSocket.getReceiveBufferSize()));
                     Log.d("Send Buffer Size:" , String.valueOf(mSocket.getSendBufferSize()));
                     Log.d("Input Shutdown:" , String.valueOf(mSocket.isInputShutdown()));
                     Log.d("Output Shutdown:" , String.valueOf(mSocket.isOutputShutdown()));
-                    mSocket.sendUrgentData(10);
+
+                    /*mSocket.sendUrgentData(10);
+                    if(readDataFromBuffer().contains("PRCDONE")){
+                        Log.d(TAG, "PRCDONE");
+                    }*/
                     publishProgress(Boolean.TRUE);
                     mSocketState = true;
                 }
@@ -248,6 +303,32 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * Method to close the Socket. If, Opened.
+     */
+    private void closeSocket() {
+        //TODO: Check if close lock is useful.
+        try {
+            if(mSocket.isConnected() && !mSocket.isClosed()) {
+
+                mSocket.close();
+                mSocketState = false;
+                invalidateOptionsMenu();
+                Toast.makeText(getApplicationContext(),
+                        "Socket Closed!",
+                        Toast.LENGTH_SHORT).show();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            Toast.makeText(getApplicationContext(),
+                    e.getMessage(),
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * UI Related Methods
+     */
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
 
