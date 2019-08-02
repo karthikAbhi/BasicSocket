@@ -1,3 +1,13 @@
 <resources>
-    <string name="app_name">BasicSocket</string>
+    <string name="app_name">NPOSWifi</string>
+    <string-array name="barcode_types">
+        <item>UPC-A</item>
+        <item>UPC-E</item>
+        <item>JAN13</item>
+        <item>JAN8</item>
+        <item>CODE39</item>
+        <item>ITF</item>
+        <item>CODABAR</item>
+        <item>CODE93</item>
+    </string-array>
 </resources>

@@ -1,4 +1,4 @@
-package com.nash.basicsocket;
+package com.nash.Wifi;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;

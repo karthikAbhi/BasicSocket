@@ -1,4 +1,4 @@
-package com.nash.basicsocket;
+package com.nash.Wifi;
 
 import org.junit.Test;
 
