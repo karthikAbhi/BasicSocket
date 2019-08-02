@@ -1,8 +1,6 @@
 package com.nash.basicsocket;
 
-import android.content.Context;
 import android.os.AsyncTask;
-import android.os.Build;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -19,6 +17,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketException;
+import java.util.Timer;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -70,7 +69,8 @@ public class MainActivity extends AppCompatActivity {
      */
     private void sendCommand() {
         //new sendCommandATask().execute(new byte[]{0x0a});
-        new advancedSendCommandATask().execute(new byte[]{0x0a});
+        String exampleString = "Hello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\nHello from the other side...\n";
+        new advancedSendCommandATask().execute(exampleString.getBytes());
     }
 
     /**
@@ -109,17 +109,35 @@ public class MainActivity extends AppCompatActivity {
         protected String doInBackground(byte[]... bytes) {
 
             try {
-                // Setting up Read timeout
-                mSocket.setSoTimeout(10);
-                sendata(bytes[0]);
+                if(mSocket == null){
+                    throw new SocketException("Null Socket");
+                }
 
-            } catch (IOException e) {
+
+                boolean success = sendData(bytes[0]);
+
+                if (success) {
+                    publishProgress(true);
+                } else {
+                    publishProgress(false);
+                }
+
+            } catch (Exception e) {
                 e.printStackTrace();
                 mSocketState = false;
                 invalidateOptionsMenu();
                 return e.getMessage();
             }
             return "Success!";
+        }
+
+        @Override
+        protected void onProgressUpdate(Boolean... values) {
+            if(!values[0]) {
+                Toast.makeText(getApplicationContext(),
+                        "Process failed!",
+                        Toast.LENGTH_SHORT).show();
+            }
         }
 
         @Override
@@ -132,32 +150,35 @@ public class MainActivity extends AppCompatActivity {
     /**
      *  Read-Write Thread Class
      */
-    public boolean sendata(byte[] bytes) {
+    public boolean sendData(byte[] bytes) throws IOException{
 
         boolean success = false;
         String tmp = "";
 
-        // Write data to the Printer
+        int totalLength = bytes.length;
+        int numOfPackets = (int) Math.ceil(totalLength/500.0);
+        int numOfSentPkts = 0;
 
+        // Write data to the Printer
+        Log.d(TAG, "Starting Write Sequence...");
         if(mSocket.isConnected() && mBufferedOutputStream != null && mBufferedInputStream != null){
 
-            int totalLength = bytes.length;
             // write data below 500 bytes
             if (totalLength < 500) {
                 try {
 
                     mBufferedOutputStream.write(bytes);
                     mBufferedOutputStream.flush();
-                    Thread.sleep(100);
+                    //Thread.sleep(100);
+
+                    tmp = readDataFromBuffer();
+                    numOfSentPkts++;
 
                 } catch (IOException e) {
                     e.printStackTrace();
                     success = false;
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    throw new IOException(e);
                 }
-
-                tmp = readDataFromBuffer();
 
                 if(tmp.contains("PRCDONE")) {
                     return true;
@@ -176,14 +197,23 @@ public class MainActivity extends AppCompatActivity {
                 do {
                     try {
 
+                        tmp = ""; // Reset the read value from the read buffer
+
                         mBufferedOutputStream.write(bytes, offset, length);
                         mBufferedOutputStream.flush();
+
+                        numOfSentPkts++;
+
+                        Log.d(TAG, "Number of Packets to Send: " + String.valueOf(numOfPackets));
+                        Log.d(TAG, "Number of Sent Packets: " + String.valueOf(numOfSentPkts));
 
                         tmp = readDataFromBuffer();
 
                     } catch (IOException e) {
                         e.printStackTrace();
                         success = false;
+                        Log.d(TAG, "Write Process: " + "Failed!\n"+ e.getMessage());
+                        throw new IOException(e);
                     }
 
                     offset += length;
@@ -194,15 +224,23 @@ public class MainActivity extends AppCompatActivity {
                         length = rem;
                         rem = 0;
                     }
+                    Log.d(TAG, "Write Process: " + "In Progress...!");
 
-                } while (totalLength != offset && tmp.equals("PRCDONE"));
+                } while (totalLength != offset && tmp.contains("PRCDONE"));
                 success = true;
             }
         }
+        if(numOfPackets == numOfSentPkts){
+            success = true;
+        }
+        else{
+            success = false;
+        }
+        Log.d(TAG, "Write Process: " + "Completed!");
         return success;
     }
     // Read data sent by the Printer
-    private String readDataFromBuffer() {
+    private String readDataFromBuffer() throws IOException{
 
         String readBufferData = "";
 
@@ -212,19 +250,29 @@ public class MainActivity extends AppCompatActivity {
 
             byte[] prcdone = new byte[10];
 
-            len = mBufferedInputStream.available();
+            while(true){
 
-            if(len != 0){
+                len = mBufferedInputStream.available();
 
-                //mBufferedInputStream.mark(7);
-                mBufferedInputStream.read(prcdone, 0, len);
+                if(len > 0){ //TODO: Changed != 0 to > 0
 
-                for(byte tmp : prcdone){
-                    readBufferData += (char)tmp;
+                    //mBufferedInputStream.mark(7);
+                    mBufferedInputStream.read(prcdone, 0, len);
+
+                    for(byte tmp : prcdone){
+                        readBufferData += (char)tmp;
+                    }
                 }
+                if(readBufferData.contains("PRCDONE")){
+                    Log.d(TAG, "In Read method: Prcdone Complete...");
+                    break;
+                }
+                Log.d(TAG, "In Read method: Waiting for Prcdone...");
             }
         } catch (IOException e) {
             e.printStackTrace();
+            Log.d(TAG, "In Read method: " + e.getMessage());
+            throw new IOException(e);
         }
         return readBufferData;
     }
@@ -234,7 +282,11 @@ public class MainActivity extends AppCompatActivity {
         @Override
         protected Void doInBackground(Void... voids) {
 
-            readDataFromBuffer();
+            try {
+                readDataFromBuffer();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             return null;
         }
     }
@@ -255,11 +307,13 @@ public class MainActivity extends AppCompatActivity {
         protected String doInBackground(Void... voids) {
 
             //Create a socket connection
+            //TODO: Check if multiple sockets are created.
             try {
                 mSocket = new Socket();
                 mSocket.setReceiveBufferSize(10);
                 SocketAddress socketAddress = new InetSocketAddress("192.168.4.1", 23);
                 mSocket.connect(socketAddress, 2000);
+                mSocket.setSoTimeout(1000*2);
 
                 if(mSocket.isConnected()){
                     mBufferedInputStream = new BufferedInputStream(mSocket.getInputStream());
@@ -333,7 +387,6 @@ public class MainActivity extends AppCompatActivity {
     public boolean onCreateOptionsMenu(Menu menu) {
 
         getMenuInflater().inflate(R.menu.menu_appbar, menu);
-
         return true;
     }
 
